@@ -35,6 +35,7 @@ Because WMATA's real-time API provides predictions rather than historical arriva
 │   ├── station_crosswalk.csv # WMATA LocationCode <-> GTFS platform
 │  └── gtfs_notes.md         # feed structure findings
 ├── notebooks/                # Jupyter Notbooks for data inspection and analysis
+    └── WMATA_Data_Inspection.ipynb
 │   └── WMATA_Data_Integration_Feasibility.ipynb
 ├── data/
 │   ├── raw/                  # append-only snapshots (contents git-ignored)
@@ -256,7 +257,7 @@ Our 12-hour pilot collected:
 - 134,108 train position records
 - 97 weather records
 - 63 rail incident records
-- Approximately 3,695 GTFS-Realtime files
+- Approximately 3,693 GTFS-Realtime files
 - Static GTFS data containing 2,176 stops and 14,228 trips
 
 We also tested data integration using a Jupyter Notebook.
@@ -268,7 +269,7 @@ These results suggest that the datasets can be connected for further analysis. H
 
 ### Next — extended collection and analysis
 
-- [ ] **Extended data collection.** Run the collectors for approximately seven days to capture more variation in weather and train service.
+- [ ] **Extended data collection.** Collect data over a longer period using a cloud environment, then select seven non-consecutive days with varied weather conditions for the final dataset.
 - [ ] **Arrival event reconstruction.** Use consecutive prediction snapshots to estimate actual train arrivals based on `Min`, `ARR`, `BRD`, and train movements.
 - [ ] **Observed headway.** Calculate the time between consecutive reconstructed arrivals at the same station, line, and direction.
 - [ ] **Scheduled headway.** Use GTFS schedules to calculate expected arrival intervals.
@@ -374,3 +375,16 @@ The extended dataset will be used for further cleaning, integration, and analysi
 - **Confounding factors.** Train delays may also be affected by incidents, maintenance, passenger demand, and time of day. We will consider these factors when analyzing the relationship between weather and Metrorail performance.
 
 - **Limited collection period.** Seven days of data may not capture enough severe weather events or unusual service disruptions. Our findings will depend on the weather and operating conditions observed during collection.
+
+
+## AI Disclosure
+**Duckwoo Kwon**
+- Codex: Assisted with python syntax 
+- ChatGpt: Assisted conducting how to inspect Static GTFS ZIP and GTFS-Realtime Protobuf files, initial data collection.
+**Junhyung Han**
+- ChatGPT: assisted with code writing, debugging, and handling trouble shooting.
+**Abdullah Khan**
+- AI assistance with code comments, summaries, roadmap formatting, and troubleshooting (specific tool and assisted files to be confirmed with the contributor).
+
+## Verification
+- We tested the collection scripts using WMATA and weather APIs. We also checked the data inspection and integration results using Jupyter Notebook outputs, summary statistics, and visualizations.
