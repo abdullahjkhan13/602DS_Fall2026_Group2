@@ -132,64 +132,100 @@ further processing and integration.
 
 ## Raw schemas
 
-### `data/raw/wmata_predictions.csv`
+### `data/raw/wmata_predictions_<date>.csv`
 
-One row per predicted train arrival, per snapshot.
+One row per predicted train arrival at a station, per snapshot.
 
 | Field | Type | Description |
 |---|---|---|
-| `Car` | string | Number of cars in the train |
+| `Car` | string | Number of cars |
 | `Destination` | string | Short destination name |
 | `DestinationCode` | string | Destination station code |
 | `DestinationName` | string | Full destination name |
-| `Group` | string | Platform / direction group ("1" or "2") |
-| `Line` | string | Metrorail line code (RD, BL, YL, OR, GR, SV) |
+| `Group` | string | Platform / direction group |
+| `Line` | string | Metrorail line code |
 | `LocationCode` | string | Station code |
 | `LocationName` | string | Station name |
-| `Min` | string | Minutes to arrival, or a status (`ARR`, `BRD`, `---`) |
-| `snapshot_ts` | datetime (UTC) | When the snapshot was collected — added by us, not from the API |
+| `Min` | string | Minutes to arrival or status (`ARR`, `BRD`, `---`) |
+| `snapshot_ts` | datetime (UTC) | Time when the data was collected |
 
-`Min` is a string, not a number: `ARR` (arriving), `BRD` (boarding), and `---`
-(no prediction) all appear and must be handled during processing.
+During our pilot, we found non-numeric values in the `Min` column, including `ARR`, `BRD`, and `---`. These values will need to be handled during preprocessing.
 
-### `data/raw/wmata_incidents.csv`
+### `data/raw/train_positions_<date>.csv`
 
-One row per active incident, per snapshot. An incident that stays open appears in
-multiple snapshots, distinguished by `snapshot_ts`.
+One row per reported train position, per snapshot.
 
 | Field | Type | Description |
 |---|---|---|
-| `IncidentID` | string | WMATA incident identifier |
-| `Description` | string | Free-text description |
+| `TrainId` | string | Train identifier |
+| `TrainNumber` | string | Train number |
+| `CarCount` | integer | Number of cars |
+| `DirectionNum` | integer | Train direction |
+| `CircuitId` | integer | Track circuit identifier |
+| `DestinationStationCode` | string | Destination station code |
+| `LineCode` | string | Metrorail line code |
+| `ServiceType` | string | Type of train service |
+| `snapshot_ts` | datetime (UTC) | Time when the data was collected |
+
+This dataset will help us track train movements and reconstruct arrival events.
+
+### `data/raw/wmata_incidents_<date>.csv`
+
+One row per active rail incident, per snapshot.
+
+| Field | Type | Description |
+|---|---|---|
+| `IncidentID` | string | Incident identifier |
+| `Description` | string | Incident description |
 | `IncidentType` | string | Incident category |
-| `LinesAffected` | string | Semicolon-delimited line codes |
-| `DateUpdated` | datetime | Last update time reported by WMATA |
-| `snapshot_ts` | datetime (UTC) | When the snapshot was collected |
+| `LinesAffected` | string | Affected Metrorail lines |
+| `DateUpdated` | datetime | Last update reported by WMATA |
+| `snapshot_ts` | datetime (UTC) | Time when the data was collected |
 
-### `data/raw/weather.csv`
+The same incident may appear in multiple snapshots if it remains active.
 
-One row per snapshot.
+### `data/raw/weather_<date>.csv`
+
+One row per weather collection snapshot.
 
 | Field | Type | Description |
 |---|---|---|
-| `time` | datetime (UTC) | Observation time reported by Open-Meteo |
-| `temperature_2m` | float | Air temperature at 2 m (°C) |
+| `time` | datetime (UTC) | Weather observation time |
+| `temperature_2m` | float | Temperature (°C) |
 | `precipitation` | float | Total precipitation (mm) |
-| `rain` | float | Rain (mm) |
+| `rain` | float | Rainfall (mm) |
 | `snowfall` | float | Snowfall (cm) |
-| `wind_speed_10m` | float | Wind speed at 10 m (km/h) |
-| `wind_gusts_10m` | float | Wind gusts at 10 m (km/h) |
-| `weather_code` | int | WMO weather interpretation code |
-| `latitude` / `longitude` | float | Query location (Metro Center) |
-| `snapshot_ts` | datetime (UTC) | When the snapshot was collected |
+| `wind_speed_10m` | float | Wind speed (km/h) |
+| `wind_gusts_10m` | float | Wind gust speed (km/h) |
+| `weather_code` | integer | Weather condition code |
+| `latitude` | float | Latitude |
+| `longitude` | float | Longitude |
+| `snapshot_ts` | datetime (UTC) | Time when the data was collected |
 
-### `data/raw/wmata_gtfs.zip`
+Weather observations may have repeated timestamps because our collection frequency is higher than the weather update frequency.
 
-Standard GTFS static feed — `stops.txt`, `routes.txt`, `trips.txt`, `stop_times.txt`,
-`calendar.txt`, and related files. `stop_times.txt` is the source of scheduled headways;
-`stops.txt` maps GTFS stop IDs to WMATA station codes and provides station coordinates.
+### Static GTFS
 
----
+Static GTFS data contains station, route, trip, and schedule information.
+
+| File | Description |
+|---|---|
+| `stops.txt` | Station and stop information |
+| `routes.txt` | Metrorail routes |
+| `trips.txt` | Scheduled trips |
+| `stop_times.txt` | Scheduled arrival and departure times |
+| `calendar.txt` | Service schedules |
+| `calendar_dates.txt` | Service exceptions |
+
+We use GTFS station information to match WMATA station codes and plan to use scheduled stop times to calculate scheduled headways.
+
+### `data/raw/gtfs_rt/`
+
+GTFS-Realtime data is stored as compressed Protocol Buffer files (`.pb.gz`).
+
+These files contain real-time transit updates that may help us reconstruct train arrival events.
+
+During our 12-hour pilot, we collected approximately 3,695 GTFS-Realtime files. Further processing is needed before integrating this data into our final dataset.
 
 ## Status
 
