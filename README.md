@@ -113,8 +113,6 @@ To build a usable dataset these must run on a schedule — see *Scheduling* belo
 
 ## Data sources
 
-## Data sources
-
 | Source | Endpoint | Auth | Cadence |
 |---|---|---|---|
 | WMATA Real-Time Rail Predictions | `StationPrediction.svc/json/GetPrediction/All` | API key header | every 1 min |
