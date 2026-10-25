@@ -45,40 +45,18 @@ The *contents* of `data/` are git-ignored — the directories themselves are kep
 repo via `.gitkeep` so the collectors have somewhere to write on a fresh clone. Raw data
 is not committed; collaborators regenerate it by running the collectors.
 
-## When the API key arrives
+## Data Collection Setup
 
-Everything below is already in place, so starting collection is four commands. Do this
-real-time data cannot be backfilled, and every hour unscheduled is an hour
-permanently missing.
+We completed our initial 12-hour pilot data collection on October 23–24, 2026. The collection scripts are now available for additional data collection.
 
-```powershell
-# 1. one-time environment setup (can be done before the key arrives)
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+To set up the collection environment, follow these steps:
 
-# 2. paste the key
-copy .env.example .env     # then edit .env and fill in WMATA_API_KEY
+1. Install the required Python packages.
+2. Configure the WMATA API key.
+3. Verify access to the required endpoints.
+4. Run the collection scripts.
 
-# 3. confirm the key reaches every product we need
-python src\verify_access.py
-
-# 4. start collecting
-.\setup_scheduler.ps1
-```
-
-`verify_access.py` prints one line per endpoint. Anything marked `NO ACCESS` means that
-product is missing from your key's subscription — fix it at
-https://developer.wmata.com/ before step 4, since the gap cannot be filled in later.
-
-Then, once collecting, rebuild the crosswalk against the live feed (the committed one was
-built from a 2024 mirror — see [ROADMAP.md](ROADMAP.md) Phase 4):
-
-```powershell
-python src\collect_gtfs.py
-python src\build_crosswalk.py
-git diff reference\station_crosswalk.csv
-```
+Since WMATA provides real-time data, repeated collection is necessary to build a dataset for our analysis.
 
 ## Setup
 
