@@ -10,10 +10,7 @@ specific line and direction — with station, line, direction, arrival time, obs
 headway, and scheduled headway, joined to the weather and rail incidents in effect at
 that time.
 
-Because WMATA's real-time API only exposes a rolling set of *predictions* (not a history
-of arrivals), arrival events have to be reconstructed after the fact from repeated
-snapshots. That is why collection runs on a schedule and appends to the raw files.
-
+Because WMATA's real-time API provides predictions rather than historical arrival records, we. eed to. econstruct actual train arrival events from repeated observations. To do this, we collect data at regular intervals and store the restuls for later analysis.
 ---
 
 ## Repository layout
@@ -34,7 +31,8 @@ snapshots. That is why collection runs on a schedule and appends to the raw file
 │   └── check_train_positions.py    # one-off field inspection
 ├── reference/                # hand-verified lookup tables (committed)
 │   ├── station_crosswalk.csv # WMATA LocationCode <-> GTFS platform
-│   └── gtfs_notes.md         # feed structure findings
+│  └── gtfs_notes.md         # feed structure findings
+├── notebooks/                # Jupyter Notbooks for data inspection and analysis
 ├── data/
 │   ├── raw/                  # append-only snapshots (contents git-ignored)
 │   └── processed/            # derived tables (contents git-ignored)
@@ -50,7 +48,7 @@ is not committed; collaborators regenerate it by running the collectors.
 ## When the API key arrives
 
 Everything below is already in place, so starting collection is four commands. Do this
-promptly — real-time data cannot be backfilled, and every hour unscheduled is an hour
+real-time data cannot be backfilled, and every hour unscheduled is an hour
 permanently missing.
 
 ```powershell
