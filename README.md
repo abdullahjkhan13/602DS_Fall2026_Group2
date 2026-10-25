@@ -33,9 +33,11 @@ Because WMATA's real-time API provides predictions rather than historical arriva
 │   ├── station_crosswalk.csv # WMATA LocationCode <-> GTFS platform
 │  └── gtfs_notes.md         # feed structure findings
 ├── notebooks/                # Jupyter Notbooks for data inspection and analysis
+│   └── WMATA_Data_Integration_Feasibility.ipynb
 ├── data/
 │   ├── raw/                  # append-only snapshots (contents git-ignored)
-│   └── processed/            # derived tables (contents git-ignored)
+│   ├── processed/            # derived tables (contents git-ignored)
+|   └── WMATA_12h_pilot.zip
 ├── logs/                     # collector logs (git-ignored, created on first run)
 ├── setup_scheduler.ps1       # register/remove the Windows scheduled tasks
 └── requirements.txt
@@ -231,113 +233,144 @@ During our 12-hour pilot, we collected approximately 3,695 GTFS-Realtime files. 
 
 Full plan, phase by phase, in [ROADMAP.md](ROADMAP.md). Summary:
 
-### Done — raw collection
-- [x] Real-time rail predictions, appended with `snapshot_ts`
-- [x] Rail incidents, appended with `snapshot_ts`
-- [x] Current weather from Open-Meteo, appended with `snapshot_ts`
-- [x] Static GTFS feed download
-- [x] Single entry point (`src/main.py`) running all six, with failure isolation
-- [x] Reliability: retries, rotating logs, daily-partitioned files, scheduler script
-- [x] Crosswalk built and validated (`reference/station_crosswalk.csv`)
+### Done — data collection and pilot validation
 
-### Next — processing and analysis
-- [ ] **Scheduling.** Automate `src/main.py` so snapshots accumulate; nothing useful can
-      be derived from a handful of manual runs.
-- [ ] **Arrival event reconstruction.** Collapse consecutive prediction snapshots into
-      discrete arrival events (e.g. detect the `Min` countdown reaching `ARR`/`BRD`, or
-      a train disappearing from the board) keyed by station, line, direction, and
-      destination. This is the core transformation and the main technical risk.
-- [ ] **Observed headway.** Difference between consecutive reconstructed arrivals at the
-      same station / line / direction.
-- [ ] **Scheduled headway.** Parse `stop_times.txt` + `calendar.txt` from the GTFS zip,
-      resolve the service calendar for each date, and compute the scheduled gap for the
-      matching time window.
-- [ ] **Station identifier crosswalk.** Map WMATA `LocationCode` to GTFS `stop_id` —
-      the two feeds do not use the same identifiers.
-- [ ] **Joins.** Attach weather (nearest snapshot in time) and incidents (active on the
-      line at the arrival time) to each arrival event.
-- [ ] **Time handling.** Everything is stored in UTC; local time of day and peak/off-peak
-      classification need `America/New_York` with DST handled correctly.
-- [ ] **Analysis.** Delay/headway deviation vs. weather, broken out by line, station, and
-      time of day.
-- [ ] **Pilot validation.** Confirm the schema holds and the three sources actually join,
-      per the pilot plan in the proposal.
+- [x] Real-time rail predictions collected with `snapshot_ts`
+- [x] Train positions collected with `snapshot_ts`
+- [x] Rail incidents collected with `snapshot_ts`
+- [x] Weather data collected from Open-Meteo
+- [x] Static GTFS feed downloaded
+- [x] GTFS-Realtime data collected
+- [x] Single entry point (`src/main.py`) for running all six collectors
+- [x] Collection scripts include retries, logging, and daily-partitioned files
+- [x] Station crosswalk created (`reference/station_crosswalk.csv`)
+- [x] Completed a 12-hour pilot collection (October 23–24, 2026)
+- [x] Checked missing values, duplicates, and timestamp consistency
+- [x] Tested WMATA–GTFS station matching and WMATA–weather timestamp alignment
+
+### Pilot results
+
+Our 12-hour pilot collected:
+
+- 752,791 WMATA prediction records
+- 134,108 train position records
+- 97 weather records
+- 63 rail incident records
+- Approximately 3,695 GTFS-Realtime files
+- Static GTFS data containing 2,176 stops and 14,228 trips
+
+We also tested data integration using a Jupyter Notebook.
+
+- WMATA–GTFS station matching: 94 out of 102 station codes matched (92.16%).
+- WMATA–weather timestamp matching: 752,791 out of 752,791 prediction records matched (100%) using a one-hour backward tolerance.
+
+These results suggest that the datasets can be connected for further analysis. However, timestamp matching does not confirm actual train arrivals.
+
+### Next — extended collection and analysis
+
+- [ ] **Extended data collection.** Run the collectors for approximately seven days to capture more variation in weather and train service.
+- [ ] **Arrival event reconstruction.** Use consecutive prediction snapshots to estimate actual train arrivals based on `Min`, `ARR`, `BRD`, and train movements.
+- [ ] **Observed headway.** Calculate the time between consecutive reconstructed arrivals at the same station, line, and direction.
+- [ ] **Scheduled headway.** Use GTFS schedules to calculate expected arrival intervals.
+- [ ] **Station identifier matching.** Investigate the eight WMATA station codes that did not match GTFS station IDs.
+- [ ] **Data cleaning.** Handle missing values, duplicate records, and non-numeric arrival predictions.
+- [ ] **Data integration.** Join train arrival events with weather observations and rail incidents.
+- [ ] **Time handling.** Convert UTC timestamps to `America/New_York` for time-of-day analysis.
+- [ ] **Analysis.** Compare observed and scheduled headways under different weather conditions.
 
 ### Known gaps in the current code
-- No `.env.example`.
-- No deduplication. Sampling faster than a source updates appends near-duplicate rows —
-  weather especially, where the Open-Meteo `time` field repeats while `snapshot_ts`
-  advances. Dedup is deferred to processing, and must key on the source's own timestamp
-  rather than `snapshot_ts`.
-- No tests.
+
+- **Missing values.** Some prediction records are missing `DestinationCode`, and some train position records are missing `DestinationStationCode` or `LineCode`.
+- **Non-numeric arrival predictions.** The `Min` column includes values such as `ARR`, `BRD`, and `---`, which require special handling.
+- **Duplicate observations.** Repeated collection can produce duplicate or near-duplicate records, especially when the source updates less frequently than our scripts.
+- **Station matching.** Eight WMATA station codes did not match GTFS station IDs during our initial test.
+- **Weather coverage.** Weather is currently collected for one location near Metro Center rather than individual stations.
+- **Limited weather variation.** No rainfall was recorded during the 12-hour pilot, so a longer collection period is needed.
+- **Arrival reconstruction.** We have not yet converted prediction snapshots into confirmed train arrival events.
+- **Testing.** Additional automated tests are needed for data cleaning and integration.
 
 ## Scheduling
 
-Each source is scheduled separately, because they need different cadences:
+The collection scripts are designed to run automatically at regular intervals. This allows us to collect continuous snapshots instead of relying on manual runs.
 
-| Collector | Cadence | Why |
-|---|---|---|
-| `collect_wmata.py` | 1 min | Arrival reconstruction needs to see `Min` count down |
-| `collect_gtfs_rt.py` | 1 min | Trip updates are the likely primary arrival source |
-| `collect_train_positions.py` | 1 min | Train identity between snapshots |
-| `collect_incidents.py` | 5 min | Incidents last minutes to hours |
-| `collect_weather.py` | 15 min | Open-Meteo refreshes about this often |
-| `collect_gtfs.py` | weekly | Static schedule changes rarely |
+### Collection frequency
 
-At these rates the WMATA calls total roughly 7,500/day, inside the free tier's
-50,000/day with room to spare.
+| Data Source | Frequency |
+|---|---|
+| WMATA Rail Predictions | Every 1 minute |
+| WMATA Train Positions | Every 1 minute |
+| WMATA GTFS-Realtime | Every 1 minute |
+| WMATA Rail Incidents | Every 5 minutes |
+| Open-Meteo Weather | Every 15 minutes |
+| Static GTFS | Weekly |
 
-Three real-time sources run at once deliberately: it is not yet settled which gives the
-most reliable arrival times (see [ROADMAP.md](ROADMAP.md) Phase 1.3), and that question
-can only be answered with real data. Collecting all three costs little; choosing wrong
-and finding out in December costs the project.
+These are our planned collection intervals. Actual intervals may vary depending on API response times, network conditions, and system availability.
 
-### Windows
+### Windows — Task Scheduler
+
+The repository includes `setup_scheduler.ps1` to configure automated collection using Windows Task Scheduler.
+
+Run the following command in PowerShell:
 
 ```powershell
-.\setup_scheduler.ps1            # register all tasks
-.\setup_scheduler.ps1 -Remove    # unregister them
+.\setup_scheduler.ps1
 ```
 
-The script refuses to run without a `.venv` and a `.env`, so it cannot silently register
-tasks that would fail every minute. It uses `.venv\Scripts\pythonw.exe` rather than a
-Microsoft Store Python — the `WindowsApps` interpreter aliases are unreliable under Task
-Scheduler — and `pythonw` avoids a console window popping up every minute.
+The scheduled task runs `src/main.py`, which manages the data collection scripts.
 
-Task Scheduler skips a run if the previous one is still going, so overlapping appends
-cannot corrupt a file. It does **not** catch up on runs missed while the machine is
-asleep — disable sleep on the collecting machine, or accept the gaps and flag them
-during validation.
+### macOS / Linux — cron
 
-### macOS / Linux (cron)
+On macOS or Linux, collection can be scheduled using `cron`.
 
-```cron
-* * * * *    cd /path/to/602DS && .venv/bin/python src/collect_wmata.py
-*/5 * * * *  cd /path/to/602DS && .venv/bin/python src/collect_incidents.py
-*/15 * * * * cd /path/to/602DS && .venv/bin/python src/collect_weather.py
-0 4 * * 0    cd /path/to/602DS && .venv/bin/python src/collect_gtfs.py
-```
-
-### Verifying it runs
+Open the crontab editor:
 
 ```bash
-tail -f logs/wmata_predictions.log     # should gain a line each minute
-ls -la data/raw/                       # files should be growing
+crontab -e
 ```
+
+Example schedule:
+
+```cron
+* * * * * cd /path/to/602DS_Fall2026_Group2 && /path/to/python src/main.py >> logs/collector.log 2>&1
+```
+
+Replace `/path/to/602DS_Fall2026_Group2` with the actual project directory and `/path/to/python` with the Python executable from your environment.
+
+This example runs `src/main.py` every minute. Individual collection frequencies should be controlled by the collection scripts or separate scheduler entries.
+
+### Extended data collection
+
+After completing our 12-hour pilot on October 23–24, 2026, our next step is to collect data for approximately seven days.
+
+We plan to use a cloud-based environment for this collection to avoid interruptions caused by shutting down or disconnecting a local computer.
+
+During the extended collection, we will check:
+
+- Whether the collection scripts continue running without major interruptions
+- Whether timestamps and collection intervals remain consistent
+- Whether missing values and duplicate records increase over time
+- Whether the dataset captures different weather conditions
+- Whether the collected data is sufficient for train arrival reconstruction
+
+The extended dataset will be used for further cleaning, integration, and analysis.
+
 
 ## Risks
 
-Carried over from the proposal, with current status:
+- **API rate limits and connection failures.** Frequent requests to WMATA APIs may cause rate limits or temporary failures. Our collection scripts include retries and logging, but interruptions may still occur.
 
-- **Rate limits.** The free WMATA tier is capped (10 calls/sec, 50,000/day by default).
-  High-cadence collection should stay well within this, but the budget should be checked
-  before raising cadence.
-- **Missing snapshots.** Arrivals between snapshots are invisible, so some events will
-  be missed and headways will be over-estimated for those gaps.
-- **Timestamp and identifier alignment.** The four sources use different identifiers and
-  time conventions; the crosswalk and UTC/local handling above address this.
-- **Weather granularity.** One grid point stands in for the whole system; a storm cell
-  over one line will be misattributed system-wide.
-- **Confounding events.** Delays from mechanical failure, staffing, or scheduled track
-  work must be separated out using the incident feed before attributing anything to
-  weather.
+- **Missing snapshots.** Network issues, API downtime, or computer shutdowns may create gaps in the collected data. We plan to use a cloud-based environment for the seven-day collection to reduce interruptions.
+
+- **Arrival event reconstruction.** WMATA provides predicted arrival times rather than a complete history of actual arrivals. We need to reconstruct arrival events from consecutive snapshots, which may introduce estimation errors.
+
+- **Missing and duplicate data.** Our pilot identified missing station information, non-numeric arrival predictions, and duplicate observations. These issues must be addressed during preprocessing.
+
+- **Station identifier matching.** WMATA and GTFS use different station identifiers. Our initial test matched 94 out of 102 WMATA station codes (92.16%), leaving eight codes that require further investigation.
+
+- **Weather data limitations.** Weather observations currently represent a single location near Metro Center. Conditions may differ across stations, and our 12-hour pilot did not capture rainfall.
+
+- **Timestamp alignment.** Although all WMATA prediction records were matched with weather timestamps during our pilot, this does not guarantee that the observations represent exactly the same moment.
+
+- **Confounding factors.** Train delays may also be affected by incidents, maintenance, passenger demand, and time of day. We will consider these factors when analyzing the relationship between weather and Metrorail performance.
+
+- **Limited collection period.** Seven days of data may not capture enough severe weather events or unusual service disruptions. Our findings will depend on the weather and operating conditions observed during collection.
