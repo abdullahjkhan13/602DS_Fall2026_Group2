@@ -11,6 +11,7 @@ headway, and scheduled headway, joined to the weather and rail incidents in effe
 that time.
 
 Because WMATA's real-time API provides predictions rather than historical arrival records, we. eed to. econstruct actual train arrival events from repeated observations. To do this, we collect data at regular intervals and store the restuls for later analysis.
+
 ---
 
 ## Repository layout
