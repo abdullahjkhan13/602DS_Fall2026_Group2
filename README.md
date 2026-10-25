@@ -111,16 +111,24 @@ To build a usable dataset these must run on a schedule — see *Scheduling* belo
 
 ## Data sources
 
+## Data sources
+
 | Source | Endpoint | Auth | Cadence |
 |---|---|---|---|
-| WMATA Real-Time Rail Predictions | `StationPrediction.svc/json/GetPrediction/All` | API key header | every run |
-| WMATA Rail Incidents | `Incidents.svc/json/Incidents` | API key header | every run |
-| WMATA Rail GTFS (static) | `gtfs/rail-gtfs-static.zip` | API key header | occasional refresh |
-| Open-Meteo Current Conditions | `api.open-meteo.com/v1/forecast` | none | every run |
+| WMATA Real-Time Rail Predictions | `StationPrediction.svc/json/GetPrediction/All` | API key header | every 1 min |
+| WMATA Train Positions | `TrainPositions/TrainPositions` | API key header | every 1 min |
+| WMATA Rail Incidents | `Incidents.svc/json/Incidents` | API key header | every 5 min |
+| WMATA Rail GTFS (static) | `gtfs/rail-gtfs-static.zip` | API key header | weekly |
+| WMATA GTFS-Realtime | GTFS-RT feeds | API key header | every 1 min |
+| Open-Meteo Current Conditions | `api.open-meteo.com/v1/forecast` | none | every 15 min |
 
-Weather is currently pulled for a single point — Metro Center (38.8983, -77.0281) — as a
-system-wide proxy. Per-station or multi-point weather is an open design question (see
-*Known gaps*).
+Weather data is currently collected from a single location, Metro Center
+(38.8983, -77.0281), and used as a system-wide reference. Collecting weather
+data from additional locations may improve station-level analysis.
+
+During our 12-hour pilot on October 23–24, 2026, we collected data from all
+six sources. The collected observations are stored with timestamps for
+further processing and integration.
 
 ## Raw schemas
 
