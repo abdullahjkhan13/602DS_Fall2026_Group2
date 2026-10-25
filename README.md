@@ -28,7 +28,8 @@ Because WMATA's real-time API provides predictions rather than historical arriva
 │   ├── collect_weather.py      # weather (Open-Meteo)  -> weather_<date>.csv
 │   ├── collect_gtfs.py         # static GTFS feed      -> wmata_gtfs_<date>.zip
 │   ├── build_crosswalk.py      # GTFS -> reference/station_crosswalk.csv
-│   └── check_train_positions.py    # one-off field inspection
+│   |── check_train_positions.py    # one-off field inspection
+│   └── pilot_12h.py
 ├── reference/                # hand-verified lookup tables (committed)
 │   ├── station_crosswalk.csv # WMATA LocationCode <-> GTFS platform
 │  └── gtfs_notes.md         # feed structure findings
