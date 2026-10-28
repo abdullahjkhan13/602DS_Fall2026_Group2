@@ -17,27 +17,34 @@ analysis of how weather affects service, broken out by line, time of day, and st
 
 ## Where we are right now
 
-*Last updated 2026-10-20.*
+*Last updated 2026-10-28.*
 
-**Blocked on one thing: the WMATA API key.** Everything that can be built without it has
-been. When the key arrives, collection starts in four commands (see the README) — no code
-needs writing first.
+**The key arrived and a 12-hour pilot ran on 23–24 October.** The processing pipeline now
+runs end to end against that pilot: schedule parsing, prediction cleaning and arrival
+reconstruction all produce output, and reconstruction recovers 98% of the trips GTFS says
+were scheduled. **The blocker is now extended collection**, not code — the pilot recorded
+zero precipitation, so it cannot answer the research question whatever we do with it.
 
 | Phase | State |
 |---|---|
 | 0 — Collection code | Done, six collectors |
-| 1 — Reliability, scheduling, storage | Done and scripted; **waiting on key to run** |
-| 2 — Arrival reconstruction | Not started; approach may change — see 1.3 |
-| 3 — GTFS schedule parsing | Feed structure mapped; parsing not written |
-| 4 — Crosswalk | Built and validated; needs re-run on the live feed |
-| 5–11 | Not started |
+| 1 — Reliability, scheduling, storage | Ran for the 12h pilot; cloud host and the duplicate-snapshot bug still open |
+| 2 — Arrival reconstruction | Built and validated (`src/reconstruct_arrivals.py`); headways not yet computed |
+| 3 — GTFS schedule parsing | Done — `src/build_schedule.py` |
+| 4 — Crosswalk | Rebuilt from the live feed; direction mapping still unverified |
+| 5 — Weather | Archive API confirmed; no processing or join written |
+| 6–8 — Incidents, dataset, QA | Not started |
+| 9 — EDA | Weather climatology audit done; nothing else |
+| 10–11 — Analysis, deliverables | Not started |
 
-**Three findings so far that changed the plan:**
+**Findings that changed the plan:**
 
-1. **WMATA publishes GTFS-Realtime rail feeds** (Phase 1.3). If `TripUpdates` carries
-   real arrival times keyed by `trip_id`, most of Phase 2 collapses — observed and
-   scheduled arrivals would share an identifier instead of being matched by inference.
-   Collectors are written and will run from day one; the decision gets made on real data.
+1. **WMATA publishes GTFS-Realtime rail feeds** (Phase 1.3). The hope was that
+   `TripUpdates` carries real arrival times keyed by `trip_id`, collapsing most of
+   Phase 2. **Still undecided:** 3,693 files were collected during the pilot but the
+   protobuf has never been decoded. It now matters less — reconstruction from
+   predictions alone already recovers 98% of scheduled trips — so this is a possible
+   cross-check rather than a dependency.
 2. **The crosswalk had a silent-failure trap** (Phase 4). Joining at GTFS *station* level
    would have dropped Metro Center, Gallery Place, L'Enfant Plaza and Fort Totten without
    error. Joining at platform level avoids it. Solved and validated.
@@ -45,6 +52,19 @@ needs writing first.
    years of history give a median of 4 snow hours in this calendar window. Rain, wind and
    freezing temperatures are all well-powered; snow is not. **This affects the research
    question as written** and should be discussed as a group.
+4. **The collector fires twice per cycle** (Phase 1.1). Half of all pilot snapshots are
+   byte-identical boards captured 2–3 seconds apart: 1,406 snapshots are really 710
+   collection cycles, and 49.5% of the 752,791 rows are redundant. It also doubles the
+   API calls counted against the rate budget. **Fix before extended collection.**
+5. **`DestinationCode` is recoverable, not lost** (Phase 2). It is missing on 49% of
+   prediction rows, but only because WMATA abbreviates the destination name on exactly
+   those rows (`Shady Grv` for `Shady Grove`) and omits the code. `DestinationName` is
+   never missing, so the code is recovered from it in `src/clean_predictions.py`. Every
+   remaining gap is a `LAST TRAIN` marker or a non-revenue train.
+6. **Countdown matching was the wrong approach** (Phase 2). Linking trains by how `Min`
+   decrements breaks whenever WMATA revises a prediction. Tracking *predicted arrival
+   time* instead — `snapshot_ts + Min`, which holds steady as the countdown ticks down —
+   is far more stable, and is what the implemented version does.
 
 ---
 
@@ -112,7 +132,9 @@ from the dataset. This is the single highest-priority item in the project.
 - [x] Collectors written for all candidate sources, so collection can start the moment a
       key exists: predictions, GTFS-RT, train positions, incidents, weather, GTFS static
 - [x] `src/verify_access.py` — probes every endpoint and reports which the key can reach
-- [ ] **Run it.** Blocked only on the API key
+- [x] **Run it.** 12-hour pilot collected 23–24 Oct 2026 (`data/pilot/WMATA_12h_pilot.zip`)
+- [ ] **Fix the duplicate firing.** Every cycle is collected twice, 2–3 seconds apart
+      (see finding 4). Check for a double-registered task in `setup_scheduler.ps1`
 - [x] Cadence per source, encoded in `setup_scheduler.ps1`:
       - predictions, GTFS-RT, train positions: every 60s
       - incidents: every 5 min
@@ -165,9 +187,14 @@ is clearly tracking individual trains through the schedule.
 **b. The `TrainPositions` REST endpoint** — documented as including a train ID, track
 circuit ID, line, direction, destination, and seconds-at-location.
 
-- [ ] Run `python src/check_train_positions.py` once the key arrives
-- [ ] If it carries a stable train ID, add a collector — useful for identity even if
-      GTFS-RT covers arrivals
+- [x] Run `python src/check_train_positions.py` once the key arrives
+- [x] If it carries a stable train ID, add a collector — useful for identity even if
+      GTFS-RT covers arrivals. `src/collect_train_positions.py` ran through the pilot:
+      134,108 rows carrying `TrainId`, `CircuitId` and `SecondsAtLocation`, with
+      `LineCode`/`DestinationStationCode` missing on 5.55%
+- [ ] **Decide whether train positions improve reconstruction.** Arrival reconstruction
+      currently uses predictions only and already matches 98% of scheduled trips. Train
+      IDs could confirm identity across snapshots, but the gain is now marginal
 
 Collect whatever proves useful from day one, even before the processing code exists.
 Reconstruction can be written later; the data to feed it only exists in real time.
@@ -179,10 +206,10 @@ Reconstruction can be written later; the data to feed it only exists in real tim
       wrong one loses data permanently, while raw bytes can be re-parsed any number of
       times
 - [x] Raw data stays out of git
-- [ ] **Measure actual growth after day one.** `GetPrediction/All` returns several
-      hundred rows per call, so expect 400k–600k rows/day from predictions alone, plus
-      the RT feeds. If it is heavier than expected, drop RT cadence or prune whichever
-      real-time source Phase 1.3 rules out
+- [x] **Measure actual growth after day one.** Measured on the pilot: 752,791 prediction
+      rows (~64 MB CSV) and 3,693 GTFS-RT files in 12 hours, so roughly 1.5M rows/day at
+      current cadence — but half of that is the duplicate firing in finding 4, so a fixed
+      collector should produce ~750k rows/day. ~100 MB/day uncompressed in total
 - [ ] Exclude `data/` from OneDrive sync — per-minute appends in a synced folder cause
       sync churn and can lock files mid-write
 
@@ -203,35 +230,53 @@ few trains with a `Min` value. There is no train ID (unless Phase 1.3 provides o
 say "a train arrived at 14:32," you must recognize the *same* train across snapshots as
 its `Min` counts down, and detect the moment it arrives.
 
-- [ ] **Load and normalize raw predictions.** Parse `snapshot_ts`, handle the `Min`
-      column's non-numeric values (`ARR` arriving, `BRD` boarding, `---` and empty for
-      no prediction), drop or flag rows with no usable prediction
-- [ ] **Define the tracking key.** Group observations by
-      `(LocationCode, Group, Line, DestinationCode)` — within a group, trains are ordered
-      by `Min`
-- [ ] **Link observations across snapshots.** For each key, match a prediction at
-      snapshot *t+1* to one at *t* where `Min` has decreased by roughly the elapsed time.
-      Start with greedy nearest-match; escalate to an assignment algorithm if it proves
-      too error-prone
-- [ ] **Detect the arrival.** Candidate rules — evaluate against reality, do not assume:
-      - last snapshot where the train shows `BRD`
-      - first snapshot where it shows `ARR`
-      - the train disappearing from the board after a low `Min`
-- [ ] **Assign an arrival timestamp** and record its uncertainty. With 60s snapshots,
-      resolution is ±1 minute at best; carry that as a column rather than pretending to
-      precision you do not have
-- [ ] **Handle the edge cases**, each of which silently corrupts headways if ignored:
-      - `Min` jumping upward when WMATA revises a prediction
-      - trains held at a platform (`BRD` persisting across many snapshots)
-      - trains vanishing without arriving (offloaded, rerouted, single-tracking)
-      - two trains to the same destination queued at the same platform
-      - gaps in collection (scheduler downtime) producing false "disappearances"
-      - end-of-line terminals, where arrival and departure behave differently
-- [ ] **Validate.** Spot-check a handful of station-hours by hand against the raw
-      snapshots. Do not proceed to headways until reconstruction is trusted — every
+**Implemented in `src/clean_predictions.py` and `src/reconstruct_arrivals.py`.**
+
+- [x] **Load and normalize raw predictions.** `src/clean_predictions.py` splits `Min`
+      into `minutes` + `status` (`ARR`/`BRD` → 0 with the status kept, `---` and empty →
+      `no_prediction`), drops the 252 exact duplicates, classifies the `No` and `--`
+      placeholder lines as non-revenue, and recovers the missing destination codes
+      (finding 5)
+- [x] **Define the tracking key.** `(location_code, group, line, destination_code)`.
+      Only viable because the destination code is now populated on all 742,584 revenue
+      rows — at 49% missing it would have been unusable
+- [x] **Link observations across snapshots.** Not by `Min` decrement, which finding 6
+      rules out. Observations are linked where `snapshot_ts + minutes` stays stable
+      within a 3-minute tolerance; greedy nearest-ETA matching, one observation per
+      track per cycle. Duplicate snapshots are collapsed into cycles first
+- [x] **Detect the arrival.** All three candidate rules implemented and the one that
+      fired is recorded per row, so they can be compared rather than assumed: last `BRD`
+      (20,543), last `ARR` (1,536), countdown expiring off the board (1,590)
+- [x] **Assign an arrival timestamp** and record its uncertainty. `arrival_uncertainty_s`
+      carries the gap to the previous observed cycle (~60s), rather than implying
+      precision we do not have
+- [~] **Handle the edge cases**, each of which silently corrupts headways if ignored:
+      - [x] `Min` jumping upward when WMATA revises a prediction — absorbed by ETA
+            tracking; the size of the revision is kept in `max_eta_jump_s`
+      - [x] trains held at a platform (`BRD` persisting across many snapshots) — the
+            *last* boarding cycle is the arrival, not the first
+      - [x] trains vanishing without arriving — 2,887 tracks, kept with a null
+            `arrival_ts` and `detection_rule="vanished"` rather than dropped
+      - [x] gaps in collection producing false "disappearances" — `gap_affected` flags
+            tracks a gap falls inside, ends, or starts (1,113 tracks)
+      - [~] two trains to the same destination queued at the same platform — a track
+            takes at most one observation per cycle, but this has not been tested
+            against a known real case
+      - [ ] end-of-line terminals, where arrival and departure behave differently —
+            not yet examined
+- [~] **Validate.** Do not proceed to headways until reconstruction is trusted — every
       downstream number inherits its errors
-- [ ] **Output** `data/processed/arrival_events.parquet`: one row per reconstructed
-      arrival, with a confidence or method flag
+      - [x] **Volume vs. the schedule:** 23,669 reconstructed arrivals against 24,153
+            GTFS scheduled trips in the same window = **98.0%**, and 95.7–98.6% on every
+            line individually. The schedule is independent of the reconstruction, which
+            makes this the strongest check available
+      - [x] **Headway plausibility:** median 9.2 min, IQR 6.1–13.3, 97.9% inside the
+            1–30 min band
+      - [~] **By hand against raw snapshots:** one station-hour checked in full
+            (A02 / group 1 / RD → B11) and both fully-observed trains matched exactly on
+            timestamp and rule. Worth repeating on a terminal and a transfer station
+- [x] **Output** `data/processed/arrival_events.parquet`: one row per reconstructed
+      arrival, with a confidence or method flag — 26,556 tracks, 23,669 of them arrivals
 
 ### 2.1 Observed headway
 - [ ] Sort arrivals by station / line / direction / time
@@ -251,21 +296,33 @@ Produces the scheduled baseline that observed service is measured against.
 > explicitly; `departure_time` values **exceed 24:00:00** (observed up to `26:12:00`);
 > and `route_id` is `RED`/`BLUE`/… while the prediction API uses `RD`/`BL`/….
 
+**Implemented in `src/build_schedule.py`.**
+
 - [x] Unzip and load `stops.txt`, `routes.txt`, `trips.txt`, `stop_times.txt`,
       `calendar_dates.txt`
-- [ ] Resolve the service calendar. Simpler than expected: with no `calendar.txt`, there
+- [x] Resolve the service calendar. Simpler than expected: with no `calendar.txt`, there
       are no weekly patterns to expand — map `service_id` to date directly from
-      `calendar_dates.txt`
-- [ ] Handle GTFS times past midnight — `25:14:00` is valid GTFS meaning 01:14 on the
-      following day, and naive parsing will throw or silently mangle late-night service
-- [ ] Build scheduled arrivals per stop / route / direction / service date
+      `calendar_dates.txt`. The live feed has 12 service ids over 73 dates, all
+      `exception_type` 1
+- [x] Handle GTFS times past midnight — parsed as offsets from the service date, not
+      clock times. The live feed reaches `27:15:00` (the 2024 snapshot only went to
+      `26:12:00`), and 87,670 arrivals roll into the following calendar day
+- [x] Build scheduled arrivals per stop / route / direction / service date — 2,897,925
+      rows, verified against an independently computed row count
+- [x] **Convert to UTC across the DST change.** The feed spans 2026-11-01, so this is
+      not hypothetical: verified +4h (EDT) before and +5h (EST) after. Both
+      `scheduled_arrival_local` and `scheduled_arrival_utc` are stored
 - [ ] **Scheduled headway** = gap between consecutive scheduled arrivals at the same
       stop / route / direction, resolved for the time window containing each observed
-      arrival
+      arrival. A groupby over the table above, best written alongside observed headway
+      (Phase 2.1) so both are computed the same way
 - [ ] Note the feed version and collection date — WMATA revises schedules, and an
       arrival must be compared against the schedule in force *that day*, not the latest
-      one. If the feed changes mid-collection, keep both.
-- [ ] Output `data/processed/scheduled_headways.parquet`
+      one. If the feed changes mid-collection, keep both. The pilot feed is valid
+      20261022–20261030, which does cover the pilot dates, but the output does not yet
+      record which feed produced it
+- [x] Output `data/processed/scheduled_arrivals.parquet` (arrivals; headways still to
+      come, hence the name change from `scheduled_headways.parquet`)
 
 ---
 
@@ -297,7 +354,12 @@ than dropping stops. Rebuild it whenever the GTFS feed is refreshed.
       trusting any headway** — a silent mismatch reverses direction for a whole line.
       Note that 79 of 102 codes have only a *center* platform serving both directions,
       so for those, direction must come from `direction_id`/destination, not the platform
-- [ ] Re-run against the live feed once the API key arrives (see *Known limitation* below)
+- [x] Re-run against the live feed once the API key arrives — done against
+      `wmata_gtfs_2026-10-23.zip`. Structure held exactly (125 platforms / 102 codes /
+      98 stations, no additions or removals), but **12 platforms had the wrong lines**:
+      E02–E10 are `GR;YL`, not `GR` (the Yellow Line now runs to Greenbelt — 1,607 trips
+      in the live feed), and D11 is `OR;SV`. The stale crosswalk would have
+      misattributed Yellow Line service at 11 stations
 
 ### 4.1 Station attributes (enables the "differs by station/line" analysis)
 - [x] Station coordinates — in the crosswalk as `stop_lat`/`stop_lon`
@@ -308,12 +370,11 @@ than dropping stops. Rebuild it whenever the GTFS feed is refreshed.
 - [x] Transfer stations flagged (`is_transfer_station`)
 - [ ] Note terminals and single-track-prone segments
 
-### Known limitation of the current crosswalk
-It was built from a **mirrored GTFS snapshot dated 2024-10-01**, pulled from the
-Mobility Database because the live feed needs an API key we did not have yet. The
-*structure* is what matters here and is unlikely to have changed, but station codes,
-platforms and schedules may have. **Re-run `src/build_crosswalk.py` against the live
-feed as soon as the key arrives**, and diff the output before relying on it.
+### Known limitation of the current crosswalk — CLOSED
+It was previously built from a mirrored GTFS snapshot dated 2024-10-01. It is now built
+from the live feed collected during the pilot, and the diff is recorded above. Rebuild
+it whenever a newer GTFS zip is collected, since the Yellow Line change shows the line
+assignments do go stale.
 
 ---
 
@@ -483,18 +544,26 @@ cannot be recovered. Phases 3 and 4 depend only on the static GTFS feed, so they
 built immediately and in parallel with collection; there is no reason to wait. Phase 2 is
 the long pole and should start as soon as a few days of snapshots exist to test against.
 
-| Order | Work | Depends on | Notes |
+| Order | Work | Depends on | Status |
 |---|---|---|---|
-| 1 | Phase 1 — **start collecting** | API key | Code ready; run it the day the key lands |
-| 2 | Phase 1.3 — settle the arrival source | 1 day of data | Decides whether Phase 2 is hard or easy |
-| 3 | Phase 3 — GTFS parsing | GTFS zip only | Can start now; structure already mapped |
-| 4 | Phase 4.1 — above/underground | nothing | Manual; start any time |
-| 5 | Phase 2 — arrival reconstruction | Phase 1.3 outcome | Longest and riskiest |
-| 6 | Phases 5 + 6 — weather and incidents | Phase 2 output | Parallelizable |
-| 7 | Phase 7 — analytical dataset | Phases 2–6 | |
-| 8 | Phase 8 — validation | Phase 7 | Gate before analysis |
-| 9 | Phases 9 + 10 — EDA and analysis | Phase 8 | |
-| 10 | Phase 11 — deliverables | All | |
+| 1 | Phase 1 — **start collecting** | API key | **Done** — 12h pilot, 23–24 Oct |
+| 2 | Phase 1.3 — settle the arrival source | 1 day of data | Predictions alone proved sufficient; GTFS-RT still undecoded |
+| 3 | Phase 3 — GTFS parsing | GTFS zip only | **Done** — `src/build_schedule.py` |
+| 4 | Phase 4.1 — above/underground | nothing | Not started; manual, start any time |
+| 5 | Phase 2 — arrival reconstruction | Phase 1.3 outcome | **Done and validated** — the risk here has largely closed |
+| 6 | **Extended collection** | cloud host | **Now the critical path** — nothing downstream is answerable without weather variation |
+| 7 | Phase 2.1 + 3 — observed and scheduled headway | Phase 2 output | Next code to write; both are groupbys over existing tables |
+| 8 | Phases 5 + 6 — weather and incidents | Phase 2 output | Parallelizable |
+| 9 | Phase 7 — analytical dataset | Phases 2–6 | |
+| 10 | Phase 8 — validation | Phase 7 | Gate before analysis |
+| 11 | Phases 9 + 10 — EDA and analysis | Phase 8 | |
+| 12 | Phase 11 — deliverables | All | |
+
+**The sequencing has changed in one important way.** Phase 2 was the long pole and is now
+done, so the critical path is no longer code — it is calendar time on the extended
+collection. Everything from Phase 7 onward is blocked on having days with varied weather,
+and that data only accrues in real time. Start the extended collection before writing
+anything else.
 
 Good parallel split across three people: one owns collection infrastructure (Phase 1),
 one owns GTFS parsing and the crosswalk (Phases 3–4), one owns reconstruction (Phase 2).
@@ -508,13 +577,14 @@ Carried from the proposal, updated with current status and mitigation.
 
 | Risk | Status | Mitigation |
 |---|---|---|
-| Collection not yet running — data lost permanently | **Open, urgent** | Code is ready; blocked only on the API key. Start the day it arrives |
-| Arrival reconstruction proves unreliable | **Open, high** | GTFS-RT may remove the problem entirely (Phase 1.3); careful Phase 2 validation either way |
+| Extended collection not yet running — data lost permanently | **Open, urgent** | The pilot proved the pipeline works. Every day not collecting is a day permanently missing, and the pilot caught no rain |
+| Collector fires twice per cycle | **Open** | Doubles API calls and storage for no gain (finding 4). Fix `setup_scheduler.ps1` before extended collection |
+| Arrival reconstruction proves unreliable | **Largely closed** | Built and validated at 98.0% of scheduled trips, 97.9% of headways plausible. Residual risk is terminals and queued trains (Phase 2 edge cases) |
 | **No testable snow in the collection window** | **Confirmed** | Climatology measured (Phase 9): median 4 snow hours. Reframe around rain/wind/freezing and state the limitation |
 | Rate limits / key expiry | Mitigated | ~7,500 of 50,000 daily calls; retries skip non-transient errors; failures logged |
 | Missed snapshots between arrivals | Expected | 60s cadence; flag gap-spanning headways (Phase 2.1) |
 | Timestamp / identifier misalignment | **Partly closed** | Crosswalk built and validated (Phase 4); `Group` ↔ direction still unverified; UTC throughout, DST-safe conversion still to do |
 | Weather granularity — one point for the system | **Closed** | Archive API confirmed: any coordinates, any past date, free (Phase 5) |
 | Confounding non-weather incidents | **Open** | Phase 6 controls, separating weather-caused incidents |
-| Raw data volume | **Partly closed** | Daily partitioning and gzipped protobuf in place; measure actual growth after day one |
-| Crosswalk built from a stale 2024 feed | **Open** | Re-run `build_crosswalk.py` on the live feed and diff (Phase 4) |
+| Raw data volume | **Closed** | Measured on the pilot: ~100 MB/day, halving once the duplicate firing is fixed. Well within tolerance |
+| Crosswalk built from a stale 2024 feed | **Closed** | Rebuilt from the live feed. It mattered: 12 platforms had the wrong lines (Phase 4) |
